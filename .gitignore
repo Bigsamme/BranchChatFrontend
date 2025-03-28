@@ -39,3 +39,24 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+# Node modules
+node_modules/
+
+# Build output
+.next/
+dist/
+
+# Env and secret files
+.env
+.env.local
+
+# API keys or secrets
+api-keys.json
+
+# Logs
+*.log
+
+# OS-specific junk
+.DS_Store

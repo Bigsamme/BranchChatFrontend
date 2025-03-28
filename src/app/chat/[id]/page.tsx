@@ -102,48 +102,121 @@ export default function ChatPage() {
   const sendMessage = useCallback(async () => {
     if (!isLoaded || !userId || !userInput.trim()) return;
     const token = await getToken();
+    const userMsg = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: userInput,
+      created_at: new Date().toISOString(),
+    };
+    const assistantMsg = {
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+    };
+  
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    const newMsgIndex = messages.length + 1;
+  
     try {
       const res = await fetch(`http://localhost:8000/chats/${chatId}/messages`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ content: userInput }),
       });
-      const data = await res.json();
-      // If the backend returns something like { user_message, assistant_message }
-      if (data.user_message && data.assistant_message) {
-        setMessages((prev) => [...prev, data.user_message, data.assistant_message]);
+  
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+  
+      const decoder = new TextDecoder();
+      let fullText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value);
+        fullText += text;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[newMsgIndex].content = fullText;
+          return updated;
+        });
       }
+
+      // After streaming is complete, fetch the latest messages to get the real IDs
+      const messagesRes = await fetch(`http://localhost:8000/chats/${chatId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const messagesData = await messagesRes.json();
+      const lastMessages = messagesData.slice(-2); // Get the last two messages
+      
+      // Update the messages with real IDs from the backend
+      setMessages(prev => prev.map(msg => {
+        if (msg.id.startsWith('user-')) {
+          return { ...msg, id: lastMessages[0].id };
+        }
+        if (msg.id.startsWith('assistant-') || msg.id.startsWith('temp-')) {
+          return { ...msg, id: lastMessages[1].id };
+        }
+        return msg;
+      }));
+
       setUserInput("");
-    } catch (error) {
-      console.error("Error sending message:", error);
+    } catch (err) {
+      console.error("Stream failed", err);
     }
-  }, [chatId, userInput, isLoaded, userId, getToken]);
+  }, [chatId, userInput, isLoaded, userId, getToken, messages]);
 
   // Send a message in the compare chat
   const sendCompareMessage = useCallback(async () => {
     if (!isLoaded || !userId || !compareChatId || !compareUserInput.trim()) return;
     const token = await getToken();
+    // Create a user message and a temporary assistant message
+    const userMsg = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: compareUserInput,
+      created_at: new Date().toISOString(),
+    };
+    const assistantMsg = {
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+    };
+    setCompareMessages((prev) => [...prev, userMsg, assistantMsg]);
+    // newMsgIndex is the index of the assistant message in the array
+    const newMsgIndex = compareMessages.length + 1;
+
     try {
       const res = await fetch(`http://localhost:8000/chats/${compareChatId}/messages`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ content: compareUserInput }),
       });
-      const data = await res.json();
-      if (data.user_message && data.assistant_message) {
-        setCompareMessages((prev) => [...prev, data.user_message, data.assistant_message]);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value);
+        setCompareMessages((prev) => {
+          const updated = [...prev];
+          updated[newMsgIndex].content += text;
+          return updated;
+        });
       }
       setCompareUserInput("");
-    } catch (error) {
-      console.error("Error sending compare message:", error);
+    } catch (err) {
+      console.error("Stream failed", err);
     }
-  }, [compareChatId, compareUserInput, isLoaded, userId, getToken]);
+  }, [compareChatId, compareUserInput, isLoaded, userId, getToken, compareMessages]);
 
   const sendBothMessage = useCallback(async () => {
     if (!isLoaded || !userId || !bothUserInput.trim()) return;
@@ -152,69 +225,68 @@ export default function ChatPage() {
       return;
     }
     const token = await getToken();
-    // Create a temporary message to indicate the message is being sent
-    const tempMessageId = `temp-${Date.now()}`;
-    const tempMessage = {
-      id: tempMessageId,
-      content: bothUserInput,
+    // Create separate temporary assistant messages for main and compare chats,
+    // and a shared user message.
+    const tempMessageMain = {
+      id: `temp-main-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+    };
+    const tempMessageCompare = {
+      id: `temp-compare-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      created_at: new Date().toISOString(),
+    };
+    const userMsg = {
+      id: `user-${Date.now()}`,
       role: "user",
+      content: bothUserInput,
       created_at: new Date().toISOString(),
     };
 
     // Optimistically update the UI for both chats
-    setMessages((prev) => [...prev, tempMessage]);
-    setCompareMessages((prev) => [...prev, tempMessage]);
+    setMessages((prev) => [...prev, userMsg, tempMessageMain]);
+    setCompareMessages((prev) => [...prev, userMsg, tempMessageCompare]);
+
+    // Helper function to stream response for a given chat
+    const streamResponse = async (
+      chatIdParam: string,
+      updateFunc: React.Dispatch<React.SetStateAction<Message[]>>,
+      tempId: string
+    ) => {
+      const res = await fetch(`http://localhost:8000/chats/${chatIdParam}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ content: bothUserInput }),
+      });
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value);
+        updateFunc((prev) =>
+          prev.map((msg) => (msg.id === tempId ? { ...msg, content: msg.content + text } : msg))
+        );
+      }
+    };
 
     try {
-      // Send both requests concurrently
-      const [resMain, resCompare] = await Promise.all([
-        fetch(`http://localhost:8000/chats/${chatId}/messages`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ content: bothUserInput }),
-        }),
-        fetch(`http://localhost:8000/chats/${compareChatId}/messages`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ content: bothUserInput }),
-        }),
+      await Promise.all([
+        streamResponse(chatId, setMessages, tempMessageMain.id),
+        streamResponse(compareChatId, setCompareMessages, tempMessageCompare.id)
       ]);
-
-      const dataMain = await resMain.json();
-      const dataCompare = await resCompare.json();
-
-      // For main chat: replace temporary message with the actual messages
-      if (dataMain.user_message && dataMain.assistant_message) {
-        setMessages((prev) =>
-          prev
-            .map((msg) => (msg.id === tempMessageId ? dataMain.user_message : msg))
-            .concat(dataMain.assistant_message)
-        );
-      } else {
-        setMessages((prev) => prev.filter((msg) => msg.id !== tempMessageId));
-      }
-
-      // For compare chat: replace temporary message with the actual messages
-      if (dataCompare.user_message && dataCompare.assistant_message) {
-        setCompareMessages((prev) =>
-          prev
-            .map((msg) => (msg.id === tempMessageId ? dataCompare.user_message : msg))
-            .concat(dataCompare.assistant_message)
-        );
-      } else {
-        setCompareMessages((prev) => prev.filter((msg) => msg.id !== tempMessageId));
-      }
     } catch (error) {
       console.error("Error sending message to both chats:", error);
-      // Remove the temporary messages on error
-      setMessages((prev) => prev.filter((msg) => msg.id !== tempMessageId));
-      setCompareMessages((prev) => prev.filter((msg) => msg.id !== tempMessageId));
+      // Remove temporary messages on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== tempMessageMain.id));
+      setCompareMessages((prev) => prev.filter((msg) => msg.id !== tempMessageCompare.id));
     }
     setBothUserInput("");
   }, [bothUserInput, chatId, compareChatId, isLoaded, userId, getToken]);
@@ -310,12 +382,14 @@ export default function ChatPage() {
                 {messages.map((msg) => (
                   <div key={msg.id} style={{ margin: "0.5rem 0" }}>
                     <strong>{msg.role}:</strong> {msg.content}
+                    {!msg.id.startsWith("user-") && !msg.id.startsWith("assistant-") && !msg.id.startsWith("temp-") && (
                     <button
                       style={{ marginLeft: "1rem", color: "blue", textDecoration: "underline" }}
                       onClick={() => openBranchForm(msg.id)}
                     >
                       Branch
                     </button>
+                  )}
                   </div>
                 ))}
               </div>
@@ -336,15 +410,17 @@ export default function ChatPage() {
                 <>
                   <h1>Compare Chat: {compareChatId}</h1>
                   <div style={{ marginBottom: "1rem", height: 400, overflowY: "auto", border: "1px solid #ccc" }}>
-                    {compareMessages.map((msg) => (
-                      <div key={msg.id} style={{ margin: "0.5rem 0" }}>
+                    {compareMessages.map((msg, index) => (
+                      <div key={`${msg.id}-${msg.content.length}-${index}`} style={{ margin: "0.5rem 0" }}>
                         <strong>{msg.role}:</strong> {msg.content}
-                        <button
-                          style={{ marginLeft: "1rem", color: "blue", textDecoration: "underline" }}
-                          onClick={() => openBranchForm(msg.id)}
-                        >
-                          Branch
-                        </button>
+                        {!msg.id.startsWith("user-") && !msg.id.startsWith("assistant-") && !msg.id.startsWith("temp-") && (
+                          <button
+                            style={{ marginLeft: "1rem", color: "blue", textDecoration: "underline" }}
+                            onClick={() => openBranchForm(msg.id)}
+                          >
+                            Branch
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -377,12 +453,14 @@ export default function ChatPage() {
               {messages.map((msg) => (
                 <div key={msg.id} style={{ margin: "0.5rem 0" }}>
                   <strong>{msg.role}:</strong> {msg.content}
-                  <button
-                    style={{ marginLeft: "1rem", color: "blue", textDecoration: "underline" }}
-                    onClick={() => openBranchForm(msg.id)}
-                  >
-                    Branch
-                  </button>
+                  {!msg.id.startsWith("user-") && !msg.id.startsWith("assistant-") && !msg.id.startsWith("temp-") && (
+                          <button
+                            style={{ marginLeft: "1rem", color: "blue", textDecoration: "underline" }}
+                            onClick={() => openBranchForm(msg.id)}
+                          >
+                            Branch
+                          </button>
+                        )}
                 </div>
               ))}
             </div>

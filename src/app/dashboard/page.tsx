@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
+  const [tokenCount, setTokenCount] = useState<number | null>(null); // New state for token count
 
   // Fetch existing chats
   const fetchChats = useCallback(async () => {
@@ -37,13 +38,31 @@ export default function DashboardPage() {
     fetchChats();
   }, [fetchChats]);
 
+  // New effect to fetch the token count
+  useEffect(() => {
+    const fetchTokenCount = async () => {
+      if (!isLoaded || !userId) return;
+      const token = await getToken();
+      try {
+        const res = await fetch("http://localhost:8000/user/token_count", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setTokenCount(data.token_count ?? null);
+      } catch (error) {
+        console.error("Error fetching token count:", error);
+      }
+    };
+    fetchTokenCount();
+  }, [isLoaded, userId, getToken]);
+
   // Create a new empty chat
   const createChat = async () => {
     if (!isLoaded || !userId) return;
     setLoading(true);
     const token = await getToken();
     try {
-    const res = await fetch("http://localhost:8000/chats", {
+      const res = await fetch("http://localhost:8000/chats", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -115,6 +134,11 @@ export default function DashboardPage() {
   return (
     <div style={{ padding: "1rem" }}>
       <h1>Dashboard</h1>
+      {tokenCount !== null && (
+        <p style={{ marginTop: "0.5rem", fontWeight: 500 }}>
+          Credits Remaining: {tokenCount}
+        </p>
+      )}
       <button onClick={createChat} disabled={loading}>
         {loading ? "Creating..." : "Create New Chat"}
       </button>

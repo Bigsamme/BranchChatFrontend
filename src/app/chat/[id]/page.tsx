@@ -683,9 +683,29 @@ export default function ChatPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ content: userInput }),
-        },
+        }
       )
+      
+      if (!res.ok) {
+        let errorMessage = "Something went wrong."
+        try {
+          const errorData = await res.json()
+          errorMessage = errorData.detail || errorData.error || errorMessage
+        } catch (e) {
+          console.error("Failed to parse error response:", e)
+        }
 
+        setIsTyping(false)
+
+        if (errorMessage.toLowerCase().includes("out of credits")) {
+          alert("You're out of credits. Please upgrade your plan to continue chatting.")
+          return
+        }
+
+        alert(errorMessage)
+        return
+      }
+      
       const reader = res.body?.getReader()
       if (!reader) throw new Error("No stream")
 
@@ -720,14 +740,19 @@ export default function ChatPage() {
       const messagesData = await messagesRes.json()
       const lastMessages = messagesData.slice(-2) // Get the last two messages
 
+      if (lastMessages.length < 2) {
+        console.error("Expected at least two messages but got:", lastMessages)
+        return
+      }
+
       // Update the messages with real IDs from the backend
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id.startsWith("user-")) {
-            return { ...msg, id: lastMessages[0].id }
+            return { ...msg, id: lastMessages[0]?.id || msg.id }
           }
           if (msg.id.startsWith("assistant-") || msg.id.startsWith("temp-")) {
-            return { ...msg, id: lastMessages[1].id }
+            return { ...msg, id: lastMessages[1]?.id || msg.id }
           }
           return msg
         }),
@@ -737,9 +762,12 @@ export default function ChatPage() {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" })
       }, 100)
-    } catch (err) {
+    }  catch (err) {
       console.error("Stream failed", err)
       setIsTyping(false)
+    
+      // Show alert to user
+      alert(err.message || "Something went wrong.")
     }
   }, [chatId, userInput, isLoaded, userId, getToken, selectedProvider, selectedModel])
 
@@ -774,12 +802,12 @@ export default function ChatPage() {
       const res = await fetch(
         `http://localhost:8000/chats/${compareChatId}/messages?provider=${selectedCompareProvider}&model=${selectedCompareModel}`,
         {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ content: compareUserInput }),
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: compareUserInput }),
         },
       )
 
@@ -874,12 +902,12 @@ export default function ChatPage() {
       const res = await fetch(
         `http://localhost:8000/chats/${chatIdParam}/messages?provider=${provider}&model=${model}`,
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ content: bothUserInput }),
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ content: bothUserInput }),
         },
       )
 
@@ -1044,14 +1072,14 @@ export default function ChatPage() {
 
           setIsTyping(true)
 
-          const res = await fetch(
+      const res = await fetch(
             `http://localhost:8000/chats/${data.new_chat_id}/messages?provider=${branchProvider}&model=${branchModel}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
               body: JSON.stringify({ content: originalMsg.content }),
             },
           )
@@ -1137,7 +1165,7 @@ export default function ChatPage() {
               }}
             >
               {chat.name || chat.id.substring(0, 8)}
-            </button>
+          </button>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -1145,9 +1173,9 @@ export default function ChatPage() {
               }}
               style={styles.compareButton}
             >
-              Compare
-            </button>
-          </div>
+            Compare
+          </button>
+        </div>
 
           {!isCollapsed && hasChildren && <div style={styles.branchChildren}>{renderBranchTree(chat.id)}</div>}
         </div>
@@ -1164,7 +1192,7 @@ export default function ChatPage() {
           ? styles.claudeMessage.backgroundColor
           : styles.openaiMessage.backgroundColor
 
-    return (
+  return (
       <div
         style={{
           ...styles.typingIndicator,
@@ -1434,18 +1462,18 @@ export default function ChatPage() {
               {showSplit ? "Hide Split" : "Show Split"}
             </button>
           </div>
-          {renderBranchTree(null)}
-        </div>
+        {renderBranchTree(null)}
+      </div>
         <div style={styles.mainContent}>
           <div style={styles.chatContainer}>
-            {showSplit ? (
+        {showSplit ? (
               <>
-                {/* Main Chat Panel */}
+            {/* Main Chat Panel */}
                 <div style={styles.chatPanel}>
                   <div style={styles.chatHeader}>
                   <h1 style={styles.chatTitle}>
                      {allChats.find((chat) => chat.id === chatId)?.name || chatId.substring(0, 8)}
-                  </h1>
+              </h1>
                   </div>
 
                   {/* Provider and Model Selection */}
@@ -1479,7 +1507,7 @@ export default function ChatPage() {
                   </div>
 
                   <div style={styles.messagesContainer}>
-                    {messages.map((msg) => (
+                {messages.map((msg) => (
                       <div
                         key={msg.id}
                         style={{
@@ -1521,20 +1549,20 @@ export default function ChatPage() {
                                 <path d="M6 3v12h6l-3 6 12-12h-6l3-6z" />
                               </svg>
                               Branch from this message
-                            </button>
-                          )}
-                      </div>
-                    ))}
+                    </button>
+                  )}
+                  </div>
+                ))}
                     {isTyping && <TypingIndicator />}
                     <div ref={bottomRef} />
-                  </div>
+              </div>
 
                   <div style={styles.inputContainer}>
-                    <input
+                <input
                       style={styles.textInput}
-                      placeholder="Type a message..."
-                      value={userInput}
-                      onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="Type a message..."
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
                       onKeyDown={handleEnterKey}
                     />
                     <button onClick={sendMessage} style={styles.sendButton} disabled={isTyping}>
@@ -1543,10 +1571,10 @@ export default function ChatPage() {
                       </svg>
                       Send
                     </button>
-                  </div>
-                </div>
+              </div>
+            </div>
 
-                {/* Compare Chat Panel */}
+            {/* Compare Chat Panel */}
                 <div style={styles.chatPanel}>
                   <div style={styles.chatHeader}>
                     <h1 style={styles.chatTitle}>
@@ -1586,10 +1614,10 @@ export default function ChatPage() {
                     </label>
                   </div>
 
-                  {compareChatId ? (
-                    <>
+              {compareChatId ? (
+                <>
                       <div style={styles.messagesContainer}>
-                        {compareMessages.map((msg, index) => (
+                    {compareMessages.map((msg, index) => (
                           <div
                             key={`${msg.id}-${index}`}
                             style={{
@@ -1631,20 +1659,20 @@ export default function ChatPage() {
                                     <path d="M6 3v12h6l-3 6 12-12h-6l3-6z" />
                                   </svg>
                                   Branch from this message
-                                </button>
-                              )}
-                          </div>
-                        ))}
+                          </button>
+                        )}
+                      </div>
+                    ))}
                         {isCompareTyping && <TypingIndicator />}
                         <div ref={compareBottomRef} />
-                      </div>
+                  </div>
 
                       <div style={styles.inputContainer}>
-                        <input
+                    <input
                           style={styles.textInput}
-                          placeholder="Type a message..."
-                          value={compareUserInput}
-                          onChange={(e) => setCompareUserInput(e.target.value)}
+                      placeholder="Type a message..."
+                      value={compareUserInput}
+                      onChange={(e) => setCompareUserInput(e.target.value)}
                           onKeyDown={handleCompareEnterKey}
                           disabled={isCompareTyping}
                         />
@@ -1661,9 +1689,9 @@ export default function ChatPage() {
                           </svg>
                           Send
                         </button>
-                      </div>
-                    </>
-                  ) : (
+                  </div>
+                </>
+              ) : (
                     <div
                       style={{
                         display: "flex",
@@ -1676,16 +1704,16 @@ export default function ChatPage() {
                     >
                       Select a branch to compare using the "Compare" button
                     </div>
-                  )}
-                </div>
+              )}
+            </div>
               </>
-            ) : (
-              // Only Main Chat Panel when split view is disabled
+        ) : (
+          // Only Main Chat Panel when split view is disabled
               <div style={styles.chatPanel}>
                 <div style={styles.chatHeader}>
                 <h1 style={styles.chatTitle}>
                    {allChats.find((chat) => chat.id === chatId)?.name || chatId.substring(0, 8)}
-                </h1>
+            </h1>
                   <button onClick={() => setShowSplit(!showSplit)} style={styles.viewToggleButton}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="2" y="3" width="20" height="18" rx="2" />
@@ -1726,7 +1754,7 @@ export default function ChatPage() {
                 </div>
 
                 <div style={styles.messagesContainer}>
-                  {messages.map((msg) => (
+              {messages.map((msg) => (
                     <div
                       key={msg.id}
                       style={{
@@ -1770,18 +1798,18 @@ export default function ChatPage() {
                             Branch from this message
                           </button>
                         )}
-                    </div>
-                  ))}
+                </div>
+              ))}
                   {isTyping && <TypingIndicator />}
                   <div ref={bottomRef} />
-                </div>
+            </div>
 
                 <div style={styles.inputContainer}>
-                  <input
+              <input
                     style={styles.textInput}
-                    placeholder="Type a message..."
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
+                placeholder="Type a message..."
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
                     onKeyDown={handleEnterKey}
                     disabled={isTyping}
                   />
@@ -1791,22 +1819,22 @@ export default function ChatPage() {
                     </svg>
                     Send
                   </button>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
-
-          {/* If split view is enabled, add an input to send a message to both chats */}
+        )}
+          </div>
+        
+        {/* If split view is enabled, add an input to send a message to both chats */}
           {showSplit && compareChatId && (
             <div style={styles.bothInputContainer}>
-              <input
+            <input
                 style={{
                   ...styles.textInput,
                   flex: 1,
                 }}
-                placeholder="Type a message for both chats..."
-                value={bothUserInput}
-                onChange={(e) => setBothUserInput(e.target.value)}
+              placeholder="Type a message for both chats..."
+              value={bothUserInput}
+              onChange={(e) => setBothUserInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") sendBothMessage()
                 }}
@@ -1828,30 +1856,30 @@ export default function ChatPage() {
                 </svg>
                 Send to Both
               </button>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
         {/* Branch form modal */}
-        {showBranchForm && (
+      {showBranchForm && (
           <div style={styles.branchFormOverlay}>
             <div style={styles.branchForm}>
               <h2 style={styles.branchFormTitle}>Create a Branch</h2>
               <p>Branch from message ID: {branchMsgId?.substring(0, 8)}</p>
 
-              <input
+          <input
                 style={styles.branchFormInput}
-                placeholder="Branch Name"
-                value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-              />
+            placeholder="Branch Name"
+            value={branchName}
+            onChange={(e) => setBranchName(e.target.value)}
+          />
 
-              <input
+          <input
                 style={styles.branchFormInput}
-                placeholder="Tags (comma separated)"
-                value={branchTags}
-                onChange={(e) => setBranchTags(e.target.value)}
-              />
+            placeholder="Tags (comma separated)"
+            value={branchTags}
+            onChange={(e) => setBranchTags(e.target.value)}
+          />
 
               {branchFromUserMessage && (
                 <div style={{ marginBottom: "1rem" }}>
@@ -1883,15 +1911,15 @@ export default function ChatPage() {
               <div style={styles.branchFormButtons}>
                 <button onClick={closeBranchForm} style={{ ...styles.branchFormButton, ...styles.cancelButton }}>
                   Cancel
-                </button>
+          </button>
                 <button onClick={createBranch} style={{ ...styles.branchFormButton, ...styles.createButton }}>
                   Create Branch
                 </button>
               </div>
             </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
     </>
   )
 }
